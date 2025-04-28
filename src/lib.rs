@@ -30,23 +30,32 @@ impl Query {
 }
 
 pub fn run(query: &Query) -> Result<(), Box<dyn Error>> {
-    let config: Vec<Entry> = Vec::new();
-    if query.command == "help" {
+    let mut config: Vec<Entry> = Vec::new();
+    if query.command != "help" {
         let cfg_path: PathBuf = match dirs::config_dir() {
             Some(path) => path.join("chatwith"),
             None => Err("No valid config path found in environment variables.")?,
         };
 
         if cfg_path.try_exists()? {
-            parse_config(&config, fs::read_to_string(cfg_path)?.lines().collect())?;
+            config = parse_config(config, fs::read_to_string(cfg_path)?.lines().collect())?;
         }
     }
-
+    dbg!(&config);
     match query.command.as_str() {
         "help" => help(),
-        "add" => add(&query.args, &config),
-        "update" => update(&query.args, &config),
-        "remove" => remove(&query.args, &config),
+        "add" => {
+            add(&query.args, &config);
+            update_config(&config);
+        }
+        "update" => {
+            update(&query.args, &config);
+            update_config(&config);
+        }
+        "remove" => {
+            config = remove(&query.args, &config);
+            update_config(&config);
+        }
         "show" => show(&query.args, &config),
         "list" => list(&config),
         _ => run_model(&query, &config),
@@ -55,13 +64,14 @@ pub fn run(query: &Query) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+#[derive(Debug, Clone)]
 struct Entry {
     name: String,
     model: String,
     options: Vec<String>,
 }
 
-fn parse_config(config: &Vec<Entry>, lines: Vec<&str>) -> Result<Vec<Entry>, Box<dyn Error>> {
+fn parse_config(config: Vec<Entry>, lines: Vec<&str>) -> Result<Vec<Entry>, Box<dyn Error>> {
     let mut config: Vec<Entry> = Vec::new();
 
     for line in lines {
@@ -93,6 +103,8 @@ fn parse_config(config: &Vec<Entry>, lines: Vec<&str>) -> Result<Vec<Entry>, Box
     Ok(config)
 }
 
+fn update_config(config: &Vec<Entry>) {}
+
 fn help() {
     println!("Valid commands: help, add, update, remove, show, list, <entry_name>");
 }
@@ -101,10 +113,34 @@ fn add(args: &Vec<String>, config: &Vec<Entry>) {}
 
 fn update(args: &Vec<String>, config: &Vec<Entry>) {}
 
-fn remove(args: &Vec<String>, config: &Vec<Entry>) {}
+fn remove<'a>(args: &Vec<String>, config: &Vec<Entry>) -> Vec<Entry> {
+    let mut new_config: Vec<Entry> = config.clone();
+
+    if args.len() > 0 {
+        for arg in args {
+            new_config.retain(|entry| entry.name.to_lowercase() != *arg.to_lowercase());
+        }
+    }
+
+    println!(
+        "Removed {} entries from config file.",
+        config.len() - new_config.len()
+    );
+
+    new_config
+}
 
 fn show(args: &Vec<String>, config: &Vec<Entry>) {}
 
-fn list(config: &Vec<Entry>) {}
+fn list(config: &Vec<Entry>) {
+    if config.len() > 0 {
+        println!("{} entries found in config file:", config.len());
+        for entry in config {
+            println!("{} {} {}", entry.name, entry.model, entry.options.join(" "));
+        }
+    } else {
+        println!("No entries found in config file.");
+    }
+}
 
 fn run_model(query: &Query, config: &Vec<Entry>) {}
