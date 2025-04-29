@@ -1,3 +1,4 @@
+use core::fmt;
 use dirs;
 use std::error::Error;
 use std::fs::File;
@@ -74,6 +75,12 @@ struct Entry {
     options: Vec<String>,
 }
 
+impl fmt::Display for Entry {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{} {} {}", self.name, self.model, self.options.join(" "))
+    }
+}
+
 fn parse_config(config: Vec<Entry>, lines: Vec<&str>) -> Result<Vec<Entry>, Box<dyn Error>> {
     let mut config: Vec<Entry> = Vec::new();
 
@@ -111,12 +118,7 @@ fn update_config(config: &Vec<Entry>, path: &PathBuf) -> Result<(), Box<dyn Erro
 
     let mut cfg_string: String = String::new();
     for entry in config {
-        let line: String = format!(
-            "{} {} {}\n",
-            entry.name,
-            entry.model,
-            entry.options.join(" ")
-        );
+        let line: String = format!("{}\n", entry);
         file.write_all(line.as_bytes())?;
     }
 
@@ -131,7 +133,7 @@ fn add(args: &Vec<String>, config: &Vec<Entry>) {}
 
 fn update(args: &Vec<String>, config: &Vec<Entry>) {}
 
-fn remove<'a>(args: &Vec<String>, config: &Vec<Entry>) -> Vec<Entry> {
+fn remove(args: &Vec<String>, config: &Vec<Entry>) -> Vec<Entry> {
     let mut new_config: Vec<Entry> = config.clone();
 
     if args.len() > 0 {
@@ -148,13 +150,21 @@ fn remove<'a>(args: &Vec<String>, config: &Vec<Entry>) -> Vec<Entry> {
     new_config
 }
 
-fn show(args: &Vec<String>, config: &Vec<Entry>) {}
+fn show(args: &Vec<String>, config: &Vec<Entry>) {
+    if config.len() > 0 {
+        for entry in config {
+            if args.iter().any(|arg| *arg == entry.name) {
+                println!("{}", entry);
+            }
+        }
+    }
+}
 
 fn list(config: &Vec<Entry>) {
     if config.len() > 0 {
         println!("{} entries found in config file:", config.len());
         for entry in config {
-            println!("{} {} {}", entry.name, entry.model, entry.options.join(" "));
+            println!("{}", entry);
         }
     } else {
         println!("No entries found in config file.");
