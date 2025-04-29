@@ -1,6 +1,8 @@
 use dirs;
 use std::error::Error;
-use std::fs;
+use std::fs::File;
+use std::fs::{self, OpenOptions};
+use std::io::Write;
 use std::path::PathBuf;
 
 const VALID_COMMANDS: [&str; 6] = ["help", "add", "update", "remove", "show", "list"];
@@ -38,27 +40,28 @@ pub fn run(query: &Query) -> Result<(), Box<dyn Error>> {
         };
 
         if cfg_path.try_exists()? {
-            config = parse_config(config, fs::read_to_string(cfg_path)?.lines().collect())?;
+            config = parse_config(config, fs::read_to_string(&cfg_path)?.lines().collect())?;
         }
-    }
-    dbg!(&config);
-    match query.command.as_str() {
-        "help" => help(),
-        "add" => {
-            add(&query.args, &config);
-            update_config(&config);
+
+        match query.command.as_str() {
+            "add" => {
+                add(&query.args, &config);
+                update_config(&config, &cfg_path)?;
+            }
+            "update" => {
+                update(&query.args, &config);
+                update_config(&config, &cfg_path)?;
+            }
+            "remove" => {
+                config = remove(&query.args, &config);
+                update_config(&config, &cfg_path)?;
+            }
+            "show" => show(&query.args, &config),
+            "list" => list(&config),
+            _ => run_model(&query, &config),
         }
-        "update" => {
-            update(&query.args, &config);
-            update_config(&config);
-        }
-        "remove" => {
-            config = remove(&query.args, &config);
-            update_config(&config);
-        }
-        "show" => show(&query.args, &config),
-        "list" => list(&config),
-        _ => run_model(&query, &config),
+    } else {
+        help()
     }
 
     Ok(())
@@ -103,7 +106,22 @@ fn parse_config(config: Vec<Entry>, lines: Vec<&str>) -> Result<Vec<Entry>, Box<
     Ok(config)
 }
 
-fn update_config(config: &Vec<Entry>) {}
+fn update_config(config: &Vec<Entry>, path: &PathBuf) -> Result<(), Box<dyn Error>> {
+    let mut file: File = File::create(path)?;
+
+    let mut cfg_string: String = String::new();
+    for entry in config {
+        let line: String = format!(
+            "{} {} {}\n",
+            entry.name,
+            entry.model,
+            entry.options.join(" ")
+        );
+        file.write_all(line.as_bytes())?;
+    }
+
+    Ok(())
+}
 
 fn help() {
     println!("Valid commands: help, add, update, remove, show, list, <entry_name>");
