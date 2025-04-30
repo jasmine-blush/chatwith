@@ -168,7 +168,7 @@ fn remove(args: &Vec<String>, config: &Vec<Entry>) -> Vec<Entry> {
 
     if args.len() > 0 {
         for arg in args {
-            new_config.retain(|entry| entry.name.to_lowercase() != *arg.to_lowercase());
+            new_config.retain(|entry| entry.name != *arg);
         }
     }
 
