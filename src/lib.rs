@@ -1,12 +1,15 @@
 use core::fmt;
+use curl::easy::Easy;
+use curl::multi::Easy2Handle;
 use dirs;
 use std::error::Error;
 use std::fs::File;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
+use std::io::stdout;
 use std::path::PathBuf;
 
-const VALID_COMMANDS: [&str; 6] = ["help", "entry", "remove", "show", "list"];
+const VALID_COMMANDS: [&str; 5] = ["help", "entry", "remove", "show", "list"];
 
 #[derive(Debug)]
 pub struct Query {
@@ -46,7 +49,7 @@ pub fn run(query: &Query) -> Result<(), Box<dyn Error>> {
 
         match query.command.as_str() {
             "entry" => {
-                add(&query.args, &mut config)?;
+                entry(&query.args, &mut config)?;
                 update_config(&config, &cfg_path)?;
             }
             "remove" => {
