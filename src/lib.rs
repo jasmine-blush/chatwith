@@ -2,9 +2,11 @@ use core::fmt;
 use curl::easy::Easy;
 use curl::multi::Easy2Handle;
 use dirs;
+use serde_json::Value;
 use std::error::Error;
 use std::fs::File;
 use std::fs::{self, OpenOptions};
+use std::io::Read;
 use std::io::Write;
 use std::io::stdout;
 use std::path::PathBuf;
@@ -58,7 +60,7 @@ pub fn run(query: &Query) -> Result<(), Box<dyn Error>> {
             }
             "show" => show(&query.args, &config),
             "list" => list(&config),
-            _ => run_model(&query, &config),
+            _ => chat(&query, &config),
         }
     } else {
         help()
@@ -204,4 +206,47 @@ fn list(config: &Vec<Entry>) {
     }
 }
 
-fn run_model(query: &Query, config: &Vec<Entry>) {}
+fn chat(query: &Query, config: &Vec<Entry>) {
+    let query_string = format!(
+        "{}{}{}{}{}",
+        r#"{"model":""#,
+        config
+            .iter()
+            .find(|entry| entry.name == query.command)
+            .expect("test0")
+            .model,
+        r#"","messages":[{"role":"user","content":""#,
+        query.args.join(" "),
+        r#""}],"stream":true}"#
+    );
+    let mut data = query_string.as_bytes();
+    let mut easy = Easy::new();
+    easy.url("http://localhost:11434/api/chat").unwrap();
+    easy.post(true).unwrap();
+
+    easy.post_fields_copy(data).unwrap();
+    easy.write_function(|data| {
+        let json: Value =
+            serde_json::from_str(String::from_utf8(data.to_vec()).unwrap().as_str()).unwrap();
+        let mut output: String = json
+            .get("message")
+            .expect("test")
+            .get("content")
+            .expect("test2")
+            .to_string()
+            .replace("\"", "");
+        let newlines: usize = output.matches("\\n").count();
+        if newlines > 0 {
+            output = output.replace("\\n", "");
+        }
+
+        print!("{}", output);
+        for _ in 0..newlines {
+            println!();
+        }
+        stdout().flush();
+        Ok(data.len())
+    })
+    .unwrap();
+    easy.perform().unwrap();
+}
