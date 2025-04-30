@@ -6,7 +6,7 @@ use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::PathBuf;
 
-const VALID_COMMANDS: [&str; 6] = ["help", "add", "update", "remove", "show", "list"];
+const VALID_COMMANDS: [&str; 6] = ["help", "entry", "remove", "show", "list"];
 
 #[derive(Debug)]
 pub struct Query {
@@ -45,12 +45,8 @@ pub fn run(query: &Query) -> Result<(), Box<dyn Error>> {
         }
 
         match query.command.as_str() {
-            "add" => {
-                add(&query.args, &config);
-                update_config(&config, &cfg_path)?;
-            }
-            "update" => {
-                update(&query.args, &config);
+            "entry" => {
+                add(&query.args, &mut config)?;
                 update_config(&config, &cfg_path)?;
             }
             "remove" => {
@@ -129,9 +125,43 @@ fn help() {
     println!("Valid commands: help, add, update, remove, show, list, <entry_name>");
 }
 
-fn add(args: &Vec<String>, config: &Vec<Entry>) {}
+fn entry(args: &Vec<String>, config: &mut Vec<Entry>) -> Result<(), Box<dyn Error>> {
+    if args.len() >= 2 {
+        let options: Vec<String> = match args.len() {
+            2 => Vec::new(),
+            _ => args[2..].to_vec(),
+        };
 
-fn update(args: &Vec<String>, config: &Vec<Entry>) {}
+        let new_entry: Entry = Entry {
+            name: args[0].clone(),
+            model: args[1].clone(),
+            options,
+        };
+
+        if config.iter().any(|entry| entry.name == new_entry.name) {
+            let mut count: i32 = 0;
+            for entry in config.iter_mut() {
+                if entry.name == new_entry.name {
+                    entry.model = new_entry.model.clone();
+                    entry.options = new_entry.options.clone();
+                    count += 1;
+                }
+            }
+            if count > 1 {
+                println!("Updated {count} entries.");
+            } else {
+                println!("Updated 1 entry.");
+            }
+        } else {
+            config.push(new_entry);
+            println!("Entry successfully added.");
+        }
+    } else {
+        Err("Incomplete entry given. Please provide at least a name and a model.")?;
+    }
+
+    Ok(())
+}
 
 fn remove(args: &Vec<String>, config: &Vec<Entry>) -> Vec<Entry> {
     let mut new_config: Vec<Entry> = config.clone();
