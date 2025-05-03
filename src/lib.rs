@@ -224,6 +224,9 @@ fn chat(query: &Query, config: &Vec<Entry>) {
     easy.url("http://localhost:11434/api/chat").unwrap();
     easy.post(true).unwrap();
 
+    print!("\x1B[90m");
+
+    let first_bold: bool = true;
     easy.post_fields_copy(data).unwrap();
     easy.write_function(|data| {
         let json: Value =
@@ -241,6 +244,9 @@ fn chat(query: &Query, config: &Vec<Entry>) {
         }
 
         print!("{}", output);
+        if output.ends_with("</think>") {
+            print!("\x1B[39m");
+        }
         for _ in 0..newlines {
             println!();
         }
