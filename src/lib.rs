@@ -212,8 +212,17 @@ fn chat(query: &Query, config: &Vec<Entry>) {
     match config.iter().find(|entry| entry.name == query.command) {
         Some(entry) => {
             let model: &String = &entry.model;
-            let message: String = query.args.join(" ");
-            let response = send_message(model, &message);
+            let mut conversation: Conversation = get_conversation(model).unwrap();
+            conversation.messages.push(Message {
+                role: Role::User,
+                content: query.args.join(" "),
+            });
+            let response: String = send_message(&conversation);
+            conversation.messages.push(Message {
+                role: Role::Assistant,
+                content: response,
+            });
+            update_conversation(&conversation);
         }
         None => {
             println!("No model with name {} found in config file.", query.command);
@@ -221,16 +230,9 @@ fn chat(query: &Query, config: &Vec<Entry>) {
     }
 }
 
-fn send_message(model: &String, message: &String) -> String {
-    let query_string = format!(
-        "{}{}{}{}{}",
-        r#"{"model":""#,
-        model,
-        r#"","messages":[{"role":"user","content":""#,
-        message,
-        r#""}],"stream":true}"#
-    );
-    let mut request = query_string.as_bytes();
+fn send_message(conversation: &Conversation) -> String {
+    let request_string: String = conversation.to_json_string();
+    let request = request_string.as_bytes();
     let mut easy = Easy::new();
     easy.url("http://localhost:11434/api/chat").unwrap();
     easy.post(true).unwrap();
@@ -248,9 +250,9 @@ fn send_message(model: &String, message: &String) -> String {
                 serde_json::from_str(String::from_utf8(data.to_vec()).unwrap().as_str()).unwrap();
             let mut output: String = json
                 .get("message")
-                .expect("test")
+                .expect("No value 'message' in response json.")
                 .get("content")
-                .expect("test2")
+                .expect("No value 'content' in response json.")
                 .to_string()
                 .replace("\"", "");
             let newlines: usize = output.matches("\\n").count();
@@ -264,18 +266,20 @@ fn send_message(model: &String, message: &String) -> String {
             }
 
             print!("{}", output);
+            if is_response {
+                response_clone.borrow_mut().push_str(&output);
+            }
 
             if output.contains("</think>") {
                 print!("\x1B[39m");
                 is_response = true;
             }
 
-            if is_response {
-                response_clone.borrow_mut().push_str(&output);
-            }
             for _ in 0..newlines {
                 println!();
-                response_clone.borrow_mut().push_str("\\n");
+                if is_response {
+                    response_clone.borrow_mut().push_str("\n");
+                }
             }
 
             stdout().flush();
@@ -287,4 +291,139 @@ fn send_message(model: &String, message: &String) -> String {
     response.borrow().clone()
 }
 
-fn update_conversation() {}
+struct Conversation {
+    model: String,
+    messages: Vec<Message>,
+}
+
+impl Conversation {
+    fn to_json_string(&self) -> String {
+        let mut json_string: String =
+            format!("{}{}{}", r#"{"model":""#, self.model, r#"","messages":["#);
+        for message in &self.messages {
+            json_string.push_str(&message.to_json_string());
+            json_string.push(',');
+        }
+        json_string.pop();
+        json_string.push_str(r#"],"stream":true}"#);
+        json_string
+    }
+}
+
+#[derive(Debug)]
+struct Message {
+    role: Role,
+    content: String,
+}
+
+impl fmt::Display for Message {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "<{}>\n{}\n</{}>\n", self.role, self.content, self.role)
+    }
+}
+
+impl Message {
+    fn to_json_string(&self) -> String {
+        format!(
+            "{}{}{}{}{}",
+            r#"{"role":""#, self.role, r#"","content":""#, self.content, r#""}"#
+        )
+    }
+}
+
+#[derive(Debug, PartialEq, Clone, Copy)]
+enum Role {
+    User,
+    Assistant,
+    None,
+}
+
+impl fmt::Display for Role {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Role::User => write!(f, "user"),
+            Role::Assistant => write!(f, "assistant"),
+            Role::None => write!(f, "none"),
+        }
+    }
+}
+
+fn get_conversation(model: &String) -> Result<Conversation, Box<dyn Error>> {
+    let conversation_path: PathBuf = match dirs::config_dir() {
+        Some(path) => path.join("chatwith/").join(format!("{}{}", model, ".conv")),
+        None => Err("No valid config path found in environment variables.")?,
+    };
+
+    if conversation_path.try_exists()? {
+        return Ok(parse_conversation(
+            model,
+            fs::read_to_string(&conversation_path)?.lines().collect(),
+        ));
+    }
+
+    Ok(Conversation {
+        model: model.clone(),
+        messages: Vec::new(),
+    })
+}
+
+fn parse_conversation(model: &String, lines: Vec<&str>) -> Conversation {
+    let mut conversation: Conversation = Conversation {
+        model: model.clone(),
+        messages: Vec::new(),
+    };
+
+    let mut current_role: Role = Role::None;
+    for line in lines {
+        match line {
+            "<user>" => current_role = Role::User,
+            "</user>" => current_role = Role::None,
+            "<assistant>" => current_role = Role::Assistant,
+            "</assistant>" => current_role = Role::None,
+            _ => {
+                if current_role != Role::None {
+                    if conversation.messages.len() == 0 {
+                        conversation.messages.push(Message {
+                            role: current_role.clone(),
+                            content: String::new(),
+                        });
+                    }
+
+                    if conversation
+                        .messages
+                        .last()
+                        .is_some_and(|message| message.role == current_role)
+                    {
+                        if let Some(message) = conversation.messages.last_mut() {
+                            message.content.push_str(line);
+                        }
+                    } else {
+                        conversation.messages.push(Message {
+                            role: current_role.clone(),
+                            content: String::from(line),
+                        });
+                    }
+                }
+            }
+        };
+    }
+
+    conversation
+}
+
+fn update_conversation(conversation: &Conversation) -> Result<(), Box<dyn Error>> {
+    let conversation_path: PathBuf = match dirs::config_dir() {
+        Some(path) => path
+            .join("chatwith/")
+            .join(format!("{}{}", &conversation.model, ".conv")),
+        None => Err("No valid config path found in environment variables.")?,
+    };
+
+    let mut file: File = File::create(conversation_path)?;
+    for message in &conversation.messages {
+        file.write_all(message.to_string().replace(r#"'"#, r#"\\'"#).as_bytes())?;
+    }
+    file.flush();
+
+    Ok(())
+}
