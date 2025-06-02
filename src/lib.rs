@@ -3,6 +3,7 @@ use curl::easy::Easy;
 use curl::multi::Easy2Handle;
 use dirs;
 use serde_json::Value;
+use std::cell::RefCell;
 use std::error::Error;
 use std::fs::File;
 use std::fs::{self, OpenOptions};
@@ -10,6 +11,7 @@ use std::io::Read;
 use std::io::Write;
 use std::io::stdout;
 use std::path::PathBuf;
+use std::rc::Rc;
 
 const VALID_COMMANDS: [&str; 5] = ["help", "entry", "remove", "show", "list"];
 
@@ -41,7 +43,7 @@ pub fn run(query: &Query) -> Result<(), Box<dyn Error>> {
     let mut config: Vec<Entry> = Vec::new();
     if query.command != "help" {
         let cfg_path: PathBuf = match dirs::config_dir() {
-            Some(path) => path.join("chatwith"),
+            Some(path) => path.join("chatwith/chatwith.cfg"),
             None => Err("No valid config path found in environment variables.")?,
         };
 
@@ -207,52 +209,82 @@ fn list(config: &Vec<Entry>) {
 }
 
 fn chat(query: &Query, config: &Vec<Entry>) {
+    match config.iter().find(|entry| entry.name == query.command) {
+        Some(entry) => {
+            let model: &String = &entry.model;
+            let message: String = query.args.join(" ");
+            let response = send_message(model, &message);
+        }
+        None => {
+            println!("No model with name {} found in config file.", query.command);
+        }
+    }
+}
+
+fn send_message(model: &String, message: &String) -> String {
     let query_string = format!(
         "{}{}{}{}{}",
         r#"{"model":""#,
-        config
-            .iter()
-            .find(|entry| entry.name == query.command)
-            .expect("test0")
-            .model,
+        model,
         r#"","messages":[{"role":"user","content":""#,
-        query.args.join(" "),
+        message,
         r#""}],"stream":true}"#
     );
-    let mut data = query_string.as_bytes();
+    let mut request = query_string.as_bytes();
     let mut easy = Easy::new();
     easy.url("http://localhost:11434/api/chat").unwrap();
     easy.post(true).unwrap();
 
-    print!("\x1B[90m");
+    let response = Rc::new(RefCell::new(String::new()));
+    let response_clone = response.clone();
+    let mut is_response: bool = true; // indicates whether thinking-block has ended
 
     let first_bold: bool = true;
-    easy.post_fields_copy(data).unwrap();
-    easy.write_function(|data| {
-        let json: Value =
-            serde_json::from_str(String::from_utf8(data.to_vec()).unwrap().as_str()).unwrap();
-        let mut output: String = json
-            .get("message")
-            .expect("test")
-            .get("content")
-            .expect("test2")
-            .to_string()
-            .replace("\"", "");
-        let newlines: usize = output.matches("\\n").count();
-        if newlines > 0 {
-            output = output.replace("\\n", "");
-        }
+    easy.post_fields_copy(request).unwrap();
+    let mut transfer = easy.transfer();
+    transfer
+        .write_function(|data: &[u8]| {
+            let json: Value =
+                serde_json::from_str(String::from_utf8(data.to_vec()).unwrap().as_str()).unwrap();
+            let mut output: String = json
+                .get("message")
+                .expect("test")
+                .get("content")
+                .expect("test2")
+                .to_string()
+                .replace("\"", "");
+            let newlines: usize = output.matches("\\n").count();
+            if newlines > 0 {
+                output = output.replace("\\n", "");
+            }
 
-        print!("{}", output);
-        if output.ends_with("</think>") {
-            print!("\x1B[39m");
-        }
-        for _ in 0..newlines {
-            println!();
-        }
-        stdout().flush();
-        Ok(data.len())
-    })
-    .unwrap();
-    easy.perform().unwrap();
+            if output.contains("<think>") {
+                print!("\x1B[90m");
+                is_response = false;
+            }
+
+            print!("{}", output);
+
+            if output.contains("</think>") {
+                print!("\x1B[39m");
+                is_response = true;
+            }
+
+            if is_response {
+                response_clone.borrow_mut().push_str(&output);
+            }
+            for _ in 0..newlines {
+                println!();
+                response_clone.borrow_mut().push_str("\\n");
+            }
+
+            stdout().flush();
+            Ok(data.len())
+        })
+        .unwrap();
+    transfer.perform().unwrap();
+
+    response.borrow().clone()
 }
+
+fn update_conversation() {}
