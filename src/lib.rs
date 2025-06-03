@@ -212,10 +212,18 @@ fn chat(query: &Query, config: &Vec<Entry>) {
     match config.iter().find(|entry| entry.name == query.command) {
         Some(entry) => {
             let model: &String = &entry.model;
+
+            let mut start_index: usize = 0;
+            if query.args.len() > 0 {
+                if query.args[0] == "-n" {
+                    remove_conversation(model);
+                    start_index = 1;
+                }
+            }
             let mut conversation: Conversation = get_conversation(model).unwrap();
             conversation.messages.push(Message {
                 role: Role::User,
-                content: query.args.join(" "),
+                content: query.args[start_index..].join(" "),
             });
             let response: String = send_message(&conversation);
             conversation.messages.push(Message {
@@ -257,7 +265,7 @@ fn send_message(conversation: &Conversation) -> String {
                 .replace("\"", "");
             let newlines: usize = output.matches("\\n").count();
             if newlines > 0 {
-                output = output.replace("\\n", "");
+                output = output.replace("\\n", "").replace("\\", ""); // sanitize newlines and escape slashes
             }
 
             if output.contains("<think>") {
@@ -348,6 +356,22 @@ impl fmt::Display for Role {
     }
 }
 
+fn remove_conversation(model: &String) -> Result<(), Box<dyn Error>> {
+    let conversation_path: PathBuf = match dirs::config_dir() {
+        Some(path) => path.join("chatwith/").join(format!("{}{}", model, ".conv")),
+        None => Err("No valid config path found in environment variables.")?,
+    };
+
+    let mut file_result: Result<File, std::io::Error> =
+        File::options().write(true).open(conversation_path);
+    if let Ok(mut file) = file_result {
+        file.set_len(0)?;
+        file.flush();
+    }
+
+    Ok(())
+}
+
 fn get_conversation(model: &String) -> Result<Conversation, Box<dyn Error>> {
     let conversation_path: PathBuf = match dirs::config_dir() {
         Some(path) => path.join("chatwith/").join(format!("{}{}", model, ".conv")),
@@ -421,7 +445,13 @@ fn update_conversation(conversation: &Conversation) -> Result<(), Box<dyn Error>
 
     let mut file: File = File::create(conversation_path)?;
     for message in &conversation.messages {
-        file.write_all(message.to_string().replace(r#"'"#, r#"\\'"#).as_bytes())?;
+        file.write_all(
+            message
+                .to_string()
+                .replace(r#"\\'"#, r#"'"#) // remove possible pre-existing sanitization
+                .replace(r#"'"#, r#"\\'"#) // sanitize apostrophes
+                .as_bytes(),
+        )?;
     }
     file.flush();
 
