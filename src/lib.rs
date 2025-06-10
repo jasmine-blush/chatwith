@@ -130,7 +130,24 @@ fn update_config(config: &Vec<Entry>, path: &PathBuf) -> Result<(), Box<dyn Erro
 }
 
 fn help() {
-    println!("Valid commands: help, add, update, remove, show, list, <entry_name>");
+    println!(
+        r#"chatwith - easily chat with your ollama models inside the terminal
+
+usage: chatwith [command [args...]]
+usage: chatwith <entry> [options...] [messages...]
+
+commands:
+  help - show this help
+  entry - add a new entry or update existing ones using "chatwith entry <entry_name> <ollama_model_name>"
+  remove - remove existing entries using "chatwith remove <entry_name>"
+  show - show all entries with names matching any of the given arguments
+  list - list all currently existing entries
+  <entry> - chat with one of your entries. all arguments are joined together and sent as a single message
+  
+options:
+  -n - start a new conversation
+"#
+    );
 }
 
 fn entry(args: &Vec<String>, config: &mut Vec<Entry>) -> Result<(), Box<dyn Error>> {
